@@ -11,6 +11,6 @@ project/boot/
 .DS_Store
 
 /tmp
-
+/lib
 /metastore_db/
 derby.log
