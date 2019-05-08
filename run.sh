@@ -34,6 +34,10 @@ fi
 
 printf "configuration complete.\n\n"
 
+# packaging classes
+printf "packaging classes for remote execution.\n\n"
+sbt "test:package"
+
 # executing job
-printf "executing spark job"
+printf "preparation completed. executing spark job."
 sbt $3

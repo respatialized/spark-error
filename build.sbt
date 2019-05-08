@@ -1,6 +1,6 @@
 resolvers += "Spark Packages Repo" at "http://dl.bintray.com/spark-packages/maven"
 
-name := "Databricks connect error reproduction"
+name := "dbconnect-test"
 
 version := "0.0.1"
 
@@ -26,3 +26,7 @@ testOptions in Test += Tests.Argument(TestFrameworks.ScalaTest, "-oD")
 
 // Add the JAR file naming conventions described here: https://github.com/MrPowers/spark-style-guide#jar-files
 // You can add the JAR file naming conventions by running the shell script
+
+ensimeScalaVersion in ThisBuild := "2.11.12"
+
+cleanupCommands in Test := "spark.stop()"
