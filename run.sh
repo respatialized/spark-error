@@ -25,7 +25,7 @@ else
 fi
 
 # copy jars to env (if not already done)
-if [ -z $(diff $(databricks-connect get-jar-dir)/ ./lib) ]; then
+if [[ -z $(diff $(databricks-connect get-jar-dir)/ ./lib) ]]; then
     printf "databricks connect jars already on classpath\n"
 else
     printf "copying and overwriting jars to classpath from dbconnect path\n"
