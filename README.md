@@ -1,6 +1,6 @@
-# dbconnect-test
+# spark-error
 
-A repo to reproduce the errors observed when trying to execute tests on Databricks connect.
+A repo to reproduce the errors observed when trying to execute tests on a Databricks cluster.
 
 ## Documentation
 
