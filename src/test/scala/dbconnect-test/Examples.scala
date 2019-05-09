@@ -4,9 +4,17 @@ import java.util.Random
 import org.scalatest.FunSuite
 import scala.collection.mutable
 
+import org.apache.spark.ml.stat.Correlation
+import org.apache.spark.sql._
+import org.apache.spark.ml.feature._
+import org.apache.spark.ml.linalg.{Vectors, Matrix}
+import org.apache.spark.sql.functions.col
+import org.apache.spark.ml.feature.Bucketizer
+
 class Examples extends FunSuite with SparkSessionTestWrapper {
 
   test("dbconnect error") {
+    import spark.implicits._
 
     val sampleCount = 100000000L
 
@@ -83,50 +91,132 @@ class Examples extends FunSuite with SparkSessionTestWrapper {
     info(s"TC has ${tc.count()} edges.")
 
 
-    case class Person(name: String, age: Long)
+    // $example on$
+    val dfA = spark.createDataFrame(Seq(
+      (0, Vectors.dense(1.0, 1.0)),
+      (1, Vectors.dense(1.0, -1.0)),
+      (2, Vectors.dense(-1.0, -1.0)),
+      (3, Vectors.dense(-1.0, 1.0))
+    )).toDF("id", "features")
 
-  private def runBasicDataFrameExample(spark: SparkSession): Unit = {
-    // $example on:create_df$
-    val df = spark.read.json("examples/src/main/resources/people.json")
+    val dfB = spark.createDataFrame(Seq(
+      (4, Vectors.dense(1.0, 0.0)),
+      (5, Vectors.dense(-1.0, 0.0)),
+      (6, Vectors.dense(0.0, 1.0)),
+      (7, Vectors.dense(0.0, -1.0))
+    )).toDF("id", "features")
 
-    // Displays the content of the DataFrame to stdout
-    df.show()
-    // +----+-------+
-    // | age|   name|
-    // +----+-------+
-    // |null|Michael|
-    // |  30|   Andy|
-    // |  19| Justin|
-    // +----+-------+
-    // $example off:create_df$
+    val key = Vectors.dense(1.0, 0.0)
 
-    // $example on:untyped_ops$
-    // This import is needed to use the $-notation
-    import spark.implicits._
-    // Print the schema in a tree format
-    df.printSchema()
-    // root
-    // |-- age: long (nullable = true)
-    // |-- name: string (nullable = true)
+    val brp = new BucketedRandomProjectionLSH()
+      .setBucketLength(2.0)
+      .setNumHashTables(3)
+      .setInputCol("features")
+      .setOutputCol("hashes")
 
-    // Select only the "name" column
-    df.select("name").show()
-    // +-------+
-    // |   name|
-    // +-------+
-    // |Michael|
-    // |   Andy|
-    // | Justin|
-    // +-------+
+    val model = brp.fit(dfA)
 
-    // Select everybody, but increment the age by 1
-    df.select($"name", $"age" + 1).show()
-    df.filter($"age" > 21).show()
-    df.groupBy("age").count().show()
+    println("The hashed dataset where hashed values are stored in the column 'hashes':")
+    model.transform(dfA).show()
 
-    df.createOrReplaceTempView("people")
+    println("Approximately joining dfA and dfB on Euclidean distance smaller than 1.5:")
+    model.approxSimilarityJoin(dfA, dfB, 1.5, "EuclideanDistance")
+      .select(col("datasetA.id").alias("idA"),
+        col("datasetB.id").alias("idB"),
+        col("EuclideanDistance")).show()
 
-    val sqlDF = spark.sql("SELECT * FROM people")
-    sqlDF.show()
+    println("Approximately searching dfA for 2 nearest neighbors of the key:")
+    model.approxNearestNeighbors(dfA, key, 2).show()
+
+    val splits = Array(Double.NegativeInfinity, -0.5, 0.0, 0.5, Double.PositiveInfinity)
+
+    val data = Array(-999.9, -0.5, -0.3, 0.0, 0.2, 999.9)
+    val dataFrame = spark.createDataFrame(data.map(Tuple1.apply)).toDF("features")
+
+    val bucketizer = new Bucketizer()
+      .setInputCol("features")
+      .setOutputCol("bucketedFeatures")
+      .setSplits(splits)
+
+    // Transform original data into its bucket index.
+    val bucketedData = bucketizer.transform(dataFrame)
+
+    println(s"Bucketizer output with ${bucketizer.getSplits.length-1} buckets")
+    bucketedData.show()
+    // $example off$
+
+    // $example on$
+    val splitsArray = Array(
+      Array(Double.NegativeInfinity, -0.5, 0.0, 0.5, Double.PositiveInfinity),
+      Array(Double.NegativeInfinity, -0.3, 0.0, 0.3, Double.PositiveInfinity))
+
+    val data2 = Array(
+      (-999.9, -999.9),
+      (-0.5, -0.2),
+      (-0.3, -0.1),
+      (0.0, 0.0),
+      (0.2, 0.4),
+      (999.9, 999.9))
+    val dataFrame2 = spark.createDataFrame(data2).toDF("features1", "features2")
+
+    val bucketizer2 = new Bucketizer()
+      .setInputCols(Array("features1", "features2"))
+      .setOutputCols(Array("bucketedFeatures1", "bucketedFeatures2"))
+      .setSplitsArray(splitsArray)
+
+    // Transform original data into its bucket index.
+    val bucketedData2 = bucketizer2.transform(dataFrame2)
+
+    println(s"Bucketizer output with [" +
+      s"${bucketizer2.getSplitsArray(0).length-1}, " +
+      s"${bucketizer2.getSplitsArray(1).length-1}] buckets for each input column")
+    bucketedData2.show()
+
+    // $example on$
+    val vecData = Seq(
+      Vectors.sparse(4, Seq((0, 1.0), (3, -2.0))),
+      Vectors.dense(4.0, 5.0, 0.0, 3.0),
+      Vectors.dense(6.0, 7.0, 0.0, 8.0),
+      Vectors.sparse(4, Seq((0, 9.0), (3, 1.0)))
+    )
+
+    val df = vecData.map(Tuple1.apply).toDF("features")
+    val Row(coeff1: Matrix) = Correlation.corr(df, "features").head
+    println(s"Pearson correlation matrix:\n $coeff1")
+
+    val Row(coeff2: Matrix) = Correlation.corr(df, "features", "spearman").head
+    println(s"Spearman correlation matrix:\n $coeff2")
+    // $example off$
+
+    val elementWiseProductDF = spark.createDataFrame(
+      Seq(
+        ("a", Vectors.dense(1.0, 2.0, 3.0)),
+        ("b", Vectors.dense(4.0, 5.0, 6.0)))).toDF("id", "vector")
+
+    val transformingVector = Vectors.dense(0.0, 1.0, 2.0)
+    val transformer = new ElementwiseProduct()
+      .setScalingVec(transformingVector)
+      .setInputCol("vector")
+      .setOutputCol("transformedVector")
+
+    transformer.transform(elementWiseProductDF).show()
+
+    val hasherDF = spark.createDataFrame(Seq(
+                                          (2.2, true, "1", "foo"),
+                                          (3.3, false, "2", "bar"),
+                                          (4.4, false, "3", "baz"),
+                                          (5.5, false, "4", "foo")
+                                        )).toDF("real", "bool", "stringNum", "string")
+
+    val hasher = new FeatureHasher()
+      .setInputCols("real", "bool", "stringNum", "string")
+      .setOutputCol("features")
+
+    val featurized = hasher.transform(hasherDF)
+    featurized.show(false)
+    // $example off$
+
+
+
   }
 }
